@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import gql from 'graphql-tag';
 import { useLazyQuery } from '@apollo/react-hooks';
 import Head from 'next/head';
@@ -167,13 +167,13 @@ function Hit({ number = 0, top = '', bottom = '' }) {
   );
 }
 
-function Instant({ number = 0, total = 0 }) {
+function Instant({ number = 0, startTime }) {
   return (
     <FullScreenResizer listen={number}>
-      <div className="present">目前已回覆 {total} 篇文章</div>
-      <div className="verb">增加了</div>
+      <div className="present">自 {startTime.toLocaleString()} 起</div>
+      <div className="verb">回覆了</div>
       <div className="number">{number}</div>
-      <div className="paragraph">篇新回覆文章</div>
+      <div className="paragraph">篇文章</div>
       <style jsx>{`
         .present {
           font-size: 36px;
@@ -302,32 +302,34 @@ function Loading({ show }) {
 }
 
 const GET_ARTICLE_COUNT = gql`
-  query GetArticleCount {
-    ListArticles(filter: { replyCount: { GT: 0 } }) {
+  query GetArticleCount($startTime: String) {
+    ListArticles(filter: { repliedAt: { GTE: $startTime } }) {
       totalCount
     }
   }
 `;
 
 function InstantPage() {
-  const [startFrom, setStartFrom] = useState(null);
+  const queryParams = querystring.parse(
+    typeof window === 'undefined' ? '' : location.hash.slice(1)
+  );
+  const startTime =
+    queryParams && queryParams.startTime
+      ? new Date(queryParams.startTime)
+      : new Date();
+
+  useEffect(() => {
+    location.hash = querystring.stringify({
+      startTime: startTime.toISOString(),
+    });
+  }, [startTime]);
+
   const [loadArticleCount, { loading, data }] = useLazyQuery(
     GET_ARTICLE_COUNT,
     {
       pollInterval: POLLING_INTERVAL,
-      onCompleted({ ListArticles: { totalCount } }) {
-        // Avoid initializing startFrom twice
-        if (startFrom) return;
-
-        const queryParams = querystring.parse(location.hash.slice(1));
-        // If startFrom is not specified in hash, set startFrom to the count.
-        //
-        const startFrom =
-          queryParams && queryParams.startFrom
-            ? queryParams.startFrom
-            : totalCount;
-        setStartFrom(startFrom);
-        location.hash = querystring.stringify({ startFrom });
+      variables: {
+        startTime: startTime.toISOString(),
       },
     }
   );
@@ -337,7 +339,7 @@ function InstantPage() {
     loadArticleCount();
   }, []);
 
-  if (loading || !startFrom) {
+  if (!data || loading) {
     return <Loading show />;
   }
 
@@ -345,13 +347,12 @@ function InstantPage() {
     ListArticles: { totalCount },
   } = data;
 
-  const number = totalCount - startFrom;
-  const specialProps = getSpecialProps(number);
+  const specialProps = getSpecialProps(totalCount);
 
   return (
     <div>
       <Head>
-        <title>{number} 篇新回覆文章 - cofacts</title>
+        <title>{totalCount} 篇新回覆文章 - cofacts</title>
         <style jsx global>{`
           html {
             color: rgba(0, 0, 0, 0.76);
@@ -361,9 +362,9 @@ function InstantPage() {
         `}</style>
       </Head>
       {specialProps ? (
-        <Hit number={number} {...specialProps} />
+        <Hit number={totalCount} {...specialProps} />
       ) : (
-        <Instant number={number} total={totalCount} />
+        <Instant number={totalCount} startTime={startTime} />
       )}
     </div>
   );
